@@ -1,0 +1,9 @@
+main
+bench
+pt
+at
+alloc
+main1
+*.o
+*.exe
+practice/
