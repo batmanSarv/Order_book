@@ -4,6 +4,7 @@
 #include <random>
 #include <vector>
 #include <thread>
+#include "MatchingEngine.h"
 
 // ============================================================
 // BM_AddAndCancel — the mixed workload you already have
@@ -160,6 +161,29 @@ static void BM_MultiThreadedAddCancel(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * num_threads * ops_per_thread);
 }
 
+// ============================================================
+// BM_QueueProducer — submit N orders through the lock-free queue,
+// the matcher processes them in a background thread
+// ============================================================
+static void BM_QueueProducer(benchmark::State& state) {
+    const int64_t N = 100000;
+    const int64_t mid = 100000;
+
+    for (auto _ : state) {
+        MatchingEngine engine;
+        std::mt19937_64 rng(42);
+
+        for (int64_t i = 0; i < N; ++i) {
+            int64_t price = mid + (rng() % 11) - 5;
+            int64_t qty = (rng() % 1000) + 1;
+            Side side = (rng() % 2 == 0) ? Side::Buy : Side::Sell;
+            Order o{static_cast<uint64_t>(i + 1), 1, price, qty, 0, side, Ordertype::Limit};
+            engine.submit(o);
+        }
+        // engine destructor joins the matcher — this includes drain time
+    }
+    state.SetItemsProcessed(state.iterations() * N);
+}
 
 // ============================================================
 BENCHMARK(BM_AddAndCancel);
@@ -167,4 +191,5 @@ BENCHMARK(BM_PureInsert);
 BENCHMARK(BM_PureCancel);
 BENCHMARK(BM_PureMatch);
 BENCHMARK(BM_MultiThreadedAddCancel)->Arg(1)->Arg(2)->Arg(4);
+BENCHMARK(BM_QueueProducer);
 BENCHMARK_MAIN();
