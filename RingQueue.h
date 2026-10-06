@@ -12,21 +12,33 @@ private:
     std::array<T,N> slots_;
     alignas(64) std::atomic<size_t> head_{0};
     alignas(64) std::atomic<size_t> tail_{0};
-
+    std::array<std::atomic<bool>, N> slot_ready_{};   // ← NEW
 public:
     bool push(const T& item){
         size_t t = tail_.load();
-        size_t next = (t+1) % N;
-        if (next == head_.load()) return false;
+        size_t next;
+        do {
+            next = (t + 1) % N;
+            if (next == head_.load()) return false;   // full
+        } while (!tail_.compare_exchange_weak(t, next));
+
+        // We now exclusively own slot t
         slots_[t] = item;
-        tail_.store(next);
+        slot_ready_[t].store(true);                    // publish
         return true;
     }
     bool pop(T& out){
         size_t h = head_.load();
-        if (h == tail_.load()) return false;
+        if (h == tail_.load()) return false;           // empty
+
+        // Wait for the producer to finish writing
+        while (!slot_ready_[h].load()) {
+            // spin
+        }
+
         out = slots_[h];
-        head_.store((h+1) % N);
+        slot_ready_[h].store(false);                   // reset for reuse
+        head_.store((h + 1) % N);
         return true;
     }
 

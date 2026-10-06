@@ -7,3 +7,11 @@ main1
 *.o
 *.exe
 practice/
+engine_test
+mpsc_test
+ring_test
+allocator.cpp
+cli.cpp
+pool_orderbook.cpp
+mpsc_test.cpp
+ring_test.cpp

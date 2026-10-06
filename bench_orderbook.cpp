@@ -186,10 +186,151 @@ static void BM_QueueProducer(benchmark::State& state) {
 }
 
 // ============================================================
+// BM_MultiProducerQueue — N producers push through the MPSC queue,
+// one matcher thread consumes
+// ============================================================
+static void BM_MultiProducerQueue(benchmark::State& state) {
+    const int num_producers = static_cast<int>(state.range(0));
+    const int64_t ops_per_producer = 25000;
+
+    for (auto _ : state) {
+        MatchingEngine engine;
+        std::atomic<uint64_t> id_counter{1};
+
+        std::vector<std::thread> producers;
+        producers.reserve(num_producers);
+
+        for (int t = 0; t < num_producers; ++t) {
+            producers.emplace_back([&, t]() {
+                std::mt19937_64 local_rng(42 + t);
+                for (int64_t i = 0; i < ops_per_producer; ++i) {
+                    int64_t price = 100000 + (local_rng() % 11) - 5;
+                    int64_t qty = (local_rng() % 1000) + 1;
+                    Side side = (local_rng() % 2 == 0) ? Side::Buy : Side::Sell;
+                    uint64_t id = id_counter.fetch_add(1);
+
+                    Order o{id, 1, price, qty, 0, side, Ordertype::Limit};
+                    engine.submit(o);
+                }
+            });
+        }
+
+        for (auto& p : producers) p.join();
+        // engine destructor joins matcher
+    }
+    state.SetItemsProcessed(state.iterations() * num_producers * ops_per_producer);
+}
+// ============================================================
+// BM_LargeBookInsert — pre-fill to N, then measure insert
+// ============================================================
+static void BM_LargeBookInsert(benchmark::State& state) {
+    const size_t prefill = static_cast<size_t>(state.range(0));
+
+    OrderBook book;
+    std::mt19937_64 rng(42);
+    uint64_t id_counter = 1;
+    const int64_t mid = 100000;
+
+    // Pre-fill with wide spread — no matching
+    for (size_t i = 0; i < prefill; ++i) {
+        int64_t price = mid + static_cast<int64_t>(rng() % 200000) - 100000;
+        Order o{id_counter++, 1, price, 1, 0, Side::Buy, Ordertype::Limit};
+        book.addOrder(o);
+    }
+
+    for (auto _ : state) {
+        int64_t price = mid + static_cast<int64_t>(rng() % 200000) - 100000;
+        Order o{id_counter++, 1, price, 1, 0, Side::Buy, Ordertype::Limit};
+        book.addOrder(o);
+    }
+    benchmark::DoNotOptimize(book);
+    state.SetItemsProcessed(state.iterations());
+}
+
+// ============================================================
+// BM_LargeBookCancel — pre-fill to N, then measure cancel
+// ============================================================
+static void BM_LargeBookCancel(benchmark::State& state) {
+    const size_t prefill = static_cast<size_t>(state.range(0));
+
+    OrderBook book;
+    std::mt19937_64 rng(42);
+    uint64_t id_counter = 1;
+    const int64_t mid = 100000;
+
+    std::vector<uint64_t> ids;
+    ids.reserve(prefill);
+
+    for (size_t i = 0; i < prefill; ++i) {
+        int64_t price = mid + static_cast<int64_t>(rng() % 200000) - 100000;
+        Order o{id_counter++, 1, price, 1, 0, Side::Buy, Ordertype::Limit};
+        book.addOrder(o);
+        ids.push_back(o.order_id);
+    }
+
+    size_t idx = 0;
+    for (auto _ : state) {
+        if (idx >= ids.size()) {
+            state.PauseTiming();
+            idx = 0;
+            state.ResumeTiming();
+        }
+        book.cancelOrder(ids[idx++]);
+    }
+    benchmark::DoNotOptimize(book);
+    state.SetItemsProcessed(state.iterations());
+}
+
+// ============================================================
+// BM_LargeBookMatch — pre-fill asks, then send matching buys
+// ============================================================
+static void BM_LargeBookMatch(benchmark::State& state) {
+    const size_t prefill = static_cast<size_t>(state.range(0));
+
+    OrderBook book;
+    std::mt19937_64 rng(42);
+    uint64_t id_counter = 1;
+    const int64_t mid = 100000;
+
+    // Pre-fill asks at various prices
+    for (size_t i = 0; i < prefill; ++i) {
+        int64_t price = mid + static_cast<int64_t>(rng() % 200000);
+        Order o{id_counter++, 1, price, 10, 0, Side::Sell, Ordertype::Limit};
+        book.addOrder(o);
+    }
+
+    size_t matched = 0;
+    for (auto _ : state) {
+        if (matched >= prefill) {
+            state.PauseTiming();
+            // refill
+            for (size_t i = 0; i < prefill; ++i) {
+                int64_t price = mid + static_cast<int64_t>(rng() % 200000);
+                Order o{id_counter++, 1, price, 10, 0, Side::Sell, Ordertype::Limit};
+                book.addOrder(o);
+            }
+            matched = 0;
+            state.ResumeTiming();
+        }
+        // Market buy — always matches best ask
+        Order o{id_counter++, 1, 0, 10, 0, Side::Buy, Ordertype::Market};
+        book.addOrder(o);
+        ++matched;
+    }
+    benchmark::DoNotOptimize(book);
+    state.SetItemsProcessed(state.iterations());
+}
+
+// ============================================================
+// ============================================================
 BENCHMARK(BM_AddAndCancel);
 BENCHMARK(BM_PureInsert);
 BENCHMARK(BM_PureCancel);
 BENCHMARK(BM_PureMatch);
 BENCHMARK(BM_MultiThreadedAddCancel)->Arg(1)->Arg(2)->Arg(4);
 BENCHMARK(BM_QueueProducer);
+BENCHMARK(BM_MultiProducerQueue)->Arg(1)->Arg(2)->Arg(4);
+BENCHMARK(BM_LargeBookInsert)->Arg(1000)->Arg(10000)->Arg(100000)->Arg(1000000)->Arg(5000000);
+BENCHMARK(BM_LargeBookCancel)->Arg(1000)->Arg(10000)->Arg(100000)->Arg(1000000)->Arg(5000000);
+BENCHMARK(BM_LargeBookMatch)->Arg(1000)->Arg(10000)->Arg(100000)->Arg(1000000)->Arg(5000000);
 BENCHMARK_MAIN();
