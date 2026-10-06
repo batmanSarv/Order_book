@@ -11,15 +11,15 @@ private:
     std::thread matcher_;
     std::atomic<bool> stop_{false};
     
-    void matcher_loop() {
+    void matcher_loop(){
         // your implementation
-        Order o;
+       Order o;
         while (!stop_.load()) {
             if (queue_.pop(o)) {
                 book_.addOrder(o);
             }
-        }   
-        // drain what's left after stop
+        }
+        // drain what's left
         while (queue_.pop(o)) {
             book_.addOrder(o);
         }

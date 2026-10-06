@@ -14,7 +14,7 @@ public:
     PoolAllocator(const PoolAllocator<U>&) noexcept { }
 
     static Pool<T>& get_pool() {
-        static Pool<T> pool(1000000);
+        static Pool<T> pool(20000000);
         return pool;
     }
 
