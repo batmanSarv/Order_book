@@ -1,8 +1,9 @@
-#include <benchmark/benchmark.h>
+#include <atomic>
 #include <benchmark/benchmark.h>
 #include "orderbook.h"
 #include <random>
 #include <vector>
+#include <thread>
 
 // ============================================================
 // BM_AddAndCancel — the mixed workload you already have
@@ -40,7 +41,7 @@ static void BM_PureInsert(benchmark::State& state) {
     for (auto _ : state) {
         if (inserted >= reset_every) {
             state.PauseTiming();
-            book = OrderBook();
+            book.clear();
             inserted = 0;
             state.ResumeTiming();
         }
@@ -122,6 +123,42 @@ static void BM_PureMatch(benchmark::State& state) {
     benchmark::DoNotOptimize(book);
     state.SetItemsProcessed(state.iterations());
 }
+static void BM_MultiThreadedAddCancel(benchmark::State& state) {
+    const int num_threads = static_cast<int>(state.range(0));
+
+    OrderBook book;
+    std::mt19937_64 rng(42);
+    const int64_t mid = 100000;
+    const int64_t ops_per_thread = 100000;
+
+    for (auto _ : state) {
+        std::vector<std::thread> threads;
+        threads.reserve(num_threads);
+
+        std::atomic<uint64_t> id_counter{1};
+
+        for (int t = 0; t < num_threads; ++t) {
+            threads.emplace_back([&book, &id_counter, mid, ops_per_thread, t]() {
+                std::mt19937_64 local_rng(42 + t);   // per-thread seed
+                for (int64_t i = 0; i < ops_per_thread; ++i) {
+                    int64_t price = mid + (local_rng() % 11) - 5;
+                    int64_t qty = (local_rng() % 1000) + 1;
+                    Side side = (local_rng() % 2 == 0) ? Side::Buy : Side::Sell;
+                    uint64_t id = id_counter.fetch_add(1);
+
+                    Order o{id, 1, price, qty, 0, side, Ordertype::Limit};
+                    book.addOrder(o);
+                    book.cancelOrder(o.order_id);
+                }
+            });
+        }
+
+        for (auto& th : threads) th.join();
+    }
+
+    benchmark::DoNotOptimize(book);
+    state.SetItemsProcessed(state.iterations() * num_threads * ops_per_thread);
+}
 
 
 // ============================================================
@@ -129,4 +166,5 @@ BENCHMARK(BM_AddAndCancel);
 BENCHMARK(BM_PureInsert);
 BENCHMARK(BM_PureCancel);
 BENCHMARK(BM_PureMatch);
+BENCHMARK(BM_MultiThreadedAddCancel)->Arg(1)->Arg(2)->Arg(4);
 BENCHMARK_MAIN();

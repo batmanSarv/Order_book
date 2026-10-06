@@ -1,12 +1,19 @@
 #include <iostream>
 #include "orderbook.h"
 #include <climits>
-
+void OrderBook::clear() {
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
+    bids.clear();
+    asks.clear();
+    phonebook.clear();
+    trade.clear();
+}
 void OrderBook::add_bid(const Order& order) {
-    // Step 1: Copy the order (so we can modify it later)
+    
+  // Step 2: Copy the order (so we can modify it later)
     Order incoming = order;
 
-    // Step 2: Choose the right map
+    // Step 3: Choose the right map
     auto it = bids.find(incoming.price);
         if(it != bids.end()){
             //need to understand this more
@@ -69,6 +76,7 @@ bool OrderBook::can_fill_order(Order& order) const{
       }   
 }
 void OrderBook::addOrder(const Order& order){
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
     Order incoming = order;
     if(incoming.order_type == Ordertype::FOK){
           if(!can_fill_order(incoming)) return;
@@ -114,6 +122,7 @@ void OrderBook::addOrder(const Order& order){
 }
 
 std::pair<int64_t,int64_t> OrderBook::best_ask() const{
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
     if(asks.empty()){
         return {0,0};
     }else{
@@ -125,6 +134,7 @@ std::pair<int64_t,int64_t> OrderBook::best_ask() const{
   //
 }
 std::pair<int64_t,int64_t> OrderBook::best_bid() const{
+     std::lock_guard<std::recursive_mutex> lock(mtx_);
     if(bids.empty()){
         return {0,0};
     }else{
@@ -134,6 +144,7 @@ std::pair<int64_t,int64_t> OrderBook::best_bid() const{
 }
 // Cancel order
 bool OrderBook::cancelOrder(uint64_t order_id){
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
     auto it = phonebook.find(order_id);
     if(it == phonebook.end()){
         return false;
@@ -142,7 +153,7 @@ bool OrderBook::cancelOrder(uint64_t order_id){
     Order& order_to_cancel = *list_it;
     if(order_to_cancel.side == Side::Buy){
           auto map_it = bids.find(order_to_cancel.price);
-          if(map_it != asks.end()){
+          if(map_it != bids.end()){
               map_it->second.orders.erase(list_it);
               map_it->second.total_quantity -= order_to_cancel.quantity;
               if(map_it->second.orders.empty()){
@@ -152,7 +163,7 @@ bool OrderBook::cancelOrder(uint64_t order_id){
     }
     else{
         auto map_it = asks.find(order_to_cancel.price);
-          if(map_it != bids.end()){
+          if(map_it != asks.end()){
               map_it->second.orders.erase(list_it);
               map_it->second.total_quantity -= order_to_cancel.quantity;
               if(map_it->second.orders.empty()){
@@ -164,6 +175,7 @@ bool OrderBook::cancelOrder(uint64_t order_id){
     return true;
 }
 bool OrderBook::modify_order(uint64_t order_id, int64_t new_price, int64_t new_quantity){
+     std::lock_guard<std::recursive_mutex> lock(mtx_);
     auto it = phonebook.find(order_id); 
     if(it == phonebook.end()){
         return false;
@@ -183,6 +195,7 @@ bool OrderBook::modify_order(uint64_t order_id, int64_t new_price, int64_t new_q
 
 //match order
 void OrderBook::match_order(Order& order){
+     //std::lock_guard<std::recursive_mutex> lock(mtx_);
     //Order incoming = order;
     while(order.quantity >0 && !asks.empty()){
       auto it = asks.begin();
@@ -218,7 +231,8 @@ void OrderBook::match_order(Order& order){
 }
 //same as match_order but the differs is just the asks and sell is for the bids book. 
 void OrderBook::sell_order(Order& order){
-   // Order incoming = order;
+    //std::lock_guard<std::recursive_mutex> lock(mtx_); 
+  // Order incoming = order;
     while(order.quantity >0 && !bids.empty()){
         auto it = bids.begin( );
         int64_t best_price = it-> first;
@@ -252,6 +266,7 @@ void OrderBook::sell_order(Order& order){
     }
 }
 DepthSnapShot OrderBook::get_depth(size_t n)const {
+     std::lock_guard<std::recursive_mutex> lock(mtx_);
     DepthSnapShot snap;
     for(auto it = bids.begin(); it != bids.end() && snap.bids.size() <n;++it){
         snap.bids.push_back(LevelInfo{it-> first,it -> second.total_quantity});
@@ -262,9 +277,11 @@ DepthSnapShot OrderBook::get_depth(size_t n)const {
     return snap;
 }
 const std::vector<Trade>& OrderBook::get_trades() const {
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
     return trade;
 }
 bool OrderBook::check_invariants() const{
+     std::lock_guard<std::recursive_mutex> lock(mtx_);
     if(!bids.empty() && !asks.empty()){
         if(bids.begin() ->first >= asks.begin() -> first){
             std::cout << "Crossed book" << std::endl;
@@ -280,7 +297,8 @@ bool OrderBook::check_invariants() const{
     return true;
 }
 bool OrderBook::check_level(const PriceLevel& level) const {
-    // 1. Level must have orders
+     //std::lock_guard<std::recursive_mutex> lock(mtx_); 
+  // 1. Level must have orders
     if (level.orders.empty()) {
         std::cout << "INVARIANT FAIL: empty level in map\n";
         return false;

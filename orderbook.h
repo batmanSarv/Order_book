@@ -9,6 +9,7 @@
 #include <utility>
 #include "trader.h"
 #include "poolallocator.h"
+#include <mutex>
 struct LevelInfo {
       int64_t price;
       int64_t quantity;
@@ -19,7 +20,8 @@ struct DepthSnapShot{
 };
 class OrderBook {
 private:
-    // 1. Bids: Highest price first
+ // 1. Bids: Highest price first
+    mutable std::recursive_mutex mtx_;
     std::map<int64_t, PriceLevel, std::greater<int64_t>,
          PoolAllocator<std::pair<const int64_t, PriceLevel>>> bids;
     std::map<int64_t, PriceLevel, std::less<int64_t>,
@@ -28,17 +30,15 @@ private:
     std::unordered_map<uint64_t, std::list<Order, PoolAllocator<Order>>::iterator> phonebook;
     std::vector<Trade> trade;
     bool check_level(const PriceLevel& level) const;
-
-public:
-    // Task 3/4: Adding orders
     void add_bid(const Order& order);
     void add_ask(const Order& order);
-    void addOrder(const Order& order);
     void match_order(Order& order);
     void sell_order(Order& order);
-
-    
+     bool can_fill_order(Order& order) const;
+public:
+    // Task 3/4: Adding orders   
     // Task 7 (Later): Cancellation
+    void addOrder(const Order& order);
     bool cancelOrder(uint64_t order_id);
 
     // ⬇️⬇️⬇️ TASK 5: ADD THESE TWO LINES ⬇️⬇️⬇️
@@ -51,5 +51,6 @@ public:
     bool modify_order(uint64_t order_id, int64_t new_price, int64_t new_quantity);
     DepthSnapShot get_depth(size_t n) const;
     bool check_invariants() const;
-    bool can_fill_order(Order& order) const;
+    void clear();
+   
    };
