@@ -5,7 +5,6 @@
 #include <vector>
 #include <thread>
 #include "MatchingEngine.h"
-
 // ============================================================
 // BM_AddAndCancel — the mixed workload you already have
 // ============================================================
@@ -26,7 +25,6 @@ static void BM_AddAndCancel(benchmark::State& state) {
     benchmark::DoNotOptimize(book);
     state.SetItemsProcessed(state.iterations());
 }
-
 // ============================================================
 // BM_PureInsert — wide spread, no matching, growing book
 // Resets the book every 50k inserts to stay under pool capacity
@@ -55,7 +53,6 @@ static void BM_PureInsert(benchmark::State& state) {
     benchmark::DoNotOptimize(book);
     state.SetItemsProcessed(state.iterations());
 }
-
 // ============================================================
 // BM_PureCancel — pre-fill book, then cancel one per iteration
 // Refills in batches of 50k when exhausted
@@ -91,7 +88,6 @@ static void BM_PureCancel(benchmark::State& state) {
     benchmark::DoNotOptimize(book);
     state.SetItemsProcessed(state.iterations());
 }
-
 // ============================================================
 // BM_PureMatch — pre-fill asks on first iteration (paused),
 // then send one crossing market buy per iteration.
@@ -160,7 +156,6 @@ static void BM_MultiThreadedAddCancel(benchmark::State& state) {
     benchmark::DoNotOptimize(book);
     state.SetItemsProcessed(state.iterations() * num_threads * ops_per_thread);
 }
-
 // ============================================================
 // BM_QueueProducer — submit N orders through the lock-free queue,
 // the matcher processes them in a background thread
@@ -184,7 +179,6 @@ static void BM_QueueProducer(benchmark::State& state) {
     }
     state.SetItemsProcessed(state.iterations() * N);
 }
-
 // ============================================================
 // BM_MultiProducerQueue — N producers push through the MPSC queue,
 // one matcher thread consumes
@@ -246,7 +240,6 @@ static void BM_LargeBookInsert(benchmark::State& state) {
     benchmark::DoNotOptimize(book);
     state.SetItemsProcessed(state.iterations());
 }
-
 // ============================================================
 // BM_LargeBookCancel — pre-fill to N, then measure cancel
 // ============================================================
