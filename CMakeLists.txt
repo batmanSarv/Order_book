@@ -43,3 +43,9 @@ if(benchmark_FOUND)
 else()
     message(STATUS "Google Benchmark not found — bench target skipped")
 endif()
+# ============================================================
+# ITCH parser — standalone binary, no external deps
+# ============================================================
+add_executable(orderbook_itch
+    itch_parser.cpp
+    orderbook.cpp)
