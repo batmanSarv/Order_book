@@ -28,7 +28,16 @@ struct OrderExecutedMsg {
     uint32_t executed_shares;
     uint64_t match_number;
 };
-
+struct OrderReplaceMsg {
+    char     message_type;      // 'U'
+    uint16_t stock_locate;
+    uint16_t tracking_number;
+    uint8_t  timestamp[6];
+    uint64_t original_order_ref;
+    uint64_t new_order_ref;
+    uint32_t shares;
+    uint32_t price;
+};
 struct OrderCancelMsg {
     char     message_type;      // 'X'
     uint16_t stock_locate;
@@ -64,6 +73,7 @@ static_assert(sizeof(OrderExecutedMsg) == 31, "OrderExecutedMsg must be 31 bytes
 static_assert(sizeof(OrderCancelMsg)   == 23, "OrderCancelMsg must be 23 bytes");
 static_assert(sizeof(OrderDeleteMsg)   == 19, "OrderDeleteMsg must be 19 bytes");
 static_assert(sizeof(SystemEventMsg)   == 12, "SystemEventMsg must be 12 bytes");
+static_assert(sizeof(OrderReplaceMsg) == 35, "OrderReplaceMsg must be 35 bytes");
 
 // ============================================================
 // Big-endian byte-swap helpers
@@ -109,7 +119,7 @@ int main(int argc, char** argv) {
     size_t offset = 0;
     uint64_t messages = 0;
     uint64_t counts[256] = {0};
-    uint64_t adds = 0, cancels = 0, deletes = 0;
+    uint64_t adds = 0, cancels = 0, deletes = 0, executes =0, replace =0;
 
     while (offset + 2 < buffer.size()) {
         uint16_t len = (static_cast<uint16_t>(buffer[offset]) << 8)
@@ -145,7 +155,7 @@ int main(int argc, char** argv) {
                     (m->buy_sell == 'B') ? Side::Buy : Side::Sell,
                     Ordertype::Limit
                 };
-                books[locate].addOrder(o);   // creates book lazily
+               books[locate].restOrder(o);   // ← rests only
                 ++adds;
                 break;
             }        
@@ -171,6 +181,36 @@ int main(int argc, char** argv) {
                 ++deletes;
                 break;
             }
+          case 'E': {
+                const auto* m = reinterpret_cast<const OrderExecutedMsg*>(body);
+                uint16_t locate = (body[1] << 8) | body[2];
+                uint64_t ref = bswap64(m->order_ref);
+                uint32_t exec_qty = bswap32(m->executed_shares);
+
+                auto it = books.find(locate);
+                if (it != books.end()) {
+                    // Find the order by ref, reduce its quantity by exec_qty
+                    // If quantity becomes 0, remove it
+                    it->second.reduceQuantity(ref, exec_qty);
+                }
+                ++executes;
+                break;
+          }
+          case 'U': {
+              const auto* m = reinterpret_cast<const OrderReplaceMsg*>(body);
+              uint16_t locate = (static_cast<uint16_t>(body[1]) << 8) | body[2];
+              uint64_t old_ref = bswap64(m->original_order_ref);
+              uint64_t new_ref = bswap64(m->new_order_ref);
+              int64_t new_price = static_cast<int64_t>(bswap32(m->price));
+              int64_t new_shares = static_cast<int64_t>(bswap32(m->shares));
+
+              auto it = books.find(locate);
+              if (it != books.end()) {
+                  it->second.replaceOrder(old_ref, new_ref, new_price, new_shares);
+              }
+              ++replace;
+              break;
+          }
           default:
                 break;
         }

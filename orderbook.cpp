@@ -2,7 +2,7 @@
 #include "orderbook.h"
 #include <climits>
 void OrderBook::clear() {
-    std::lock_guard<std::recursive_mutex> lock(mtx_);
+    //std::lock_guard<std::recursive_mutex> lock(mtx_);
     bids.clear();
     asks.clear();
     phonebook.clear();
@@ -76,7 +76,7 @@ bool OrderBook::can_fill_order(Order& order) const{
       }   
 }
 void OrderBook::addOrder(const Order& order){
-    std::lock_guard<std::recursive_mutex> lock(mtx_);
+    //std::lock_guard<std::recursive_mutex> lock(mtx_);
     Order incoming = order;
     if(incoming.order_type == Ordertype::FOK){
           if(!can_fill_order(incoming)) return;
@@ -122,7 +122,7 @@ void OrderBook::addOrder(const Order& order){
 }
 
 std::pair<int64_t,int64_t> OrderBook::best_ask() const{
-    std::lock_guard<std::recursive_mutex> lock(mtx_);
+    //std::lock_guard<std::recursive_mutex> lock(mtx_);
     if(asks.empty()){
         return {0,0};
     }else{
@@ -134,7 +134,7 @@ std::pair<int64_t,int64_t> OrderBook::best_ask() const{
   //
 }
 std::pair<int64_t,int64_t> OrderBook::best_bid() const{
-     std::lock_guard<std::recursive_mutex> lock(mtx_);
+    // std::lock_guard<std::recursive_mutex> lock(mtx_);
     if(bids.empty()){
         return {0,0};
     }else{
@@ -144,7 +144,7 @@ std::pair<int64_t,int64_t> OrderBook::best_bid() const{
 }
 // Cancel order
 bool OrderBook::cancelOrder(uint64_t order_id){
-    std::lock_guard<std::recursive_mutex> lock(mtx_);
+    //std::lock_guard<std::recursive_mutex> lock(mtx_);
     auto it = phonebook.find(order_id);
     if(it == phonebook.end()){
         return false;
@@ -175,7 +175,7 @@ bool OrderBook::cancelOrder(uint64_t order_id){
     return true;
 }
 bool OrderBook::modify_order(uint64_t order_id, int64_t new_price, int64_t new_quantity){
-     std::lock_guard<std::recursive_mutex> lock(mtx_);
+    // std::lock_guard<std::recursive_mutex> lock(mtx_);
     auto it = phonebook.find(order_id); 
     if(it == phonebook.end()){
         return false;
@@ -266,7 +266,7 @@ void OrderBook::sell_order(Order& order){
     }
 }
 DepthSnapShot OrderBook::get_depth(size_t n)const {
-     std::lock_guard<std::recursive_mutex> lock(mtx_);
+    // std::lock_guard<std::recursive_mutex> lock(mtx_);
     DepthSnapShot snap;
     for(auto it = bids.begin(); it != bids.end() && snap.bids.size() <n;++it){
         snap.bids.push_back(LevelInfo{it-> first,it -> second.total_quantity});
@@ -277,11 +277,11 @@ DepthSnapShot OrderBook::get_depth(size_t n)const {
     return snap;
 }
 const std::vector<Trade>& OrderBook::get_trades() const {
-    std::lock_guard<std::recursive_mutex> lock(mtx_);
+    //std::lock_guard<std::recursive_mutex> lock(mtx_);
     return trade;
 }
 bool OrderBook::check_invariants() const{
-     std::lock_guard<std::recursive_mutex> lock(mtx_);
+    // std::lock_guard<std::recursive_mutex> lock(mtx_);
     if(!bids.empty() && !asks.empty()){
         if(bids.begin() ->first >= asks.begin() -> first){
             std::cout << "Crossed book" << std::endl;
@@ -317,6 +317,60 @@ bool OrderBook::check_level(const PriceLevel& level) const {
         std::cout << "INVARIANT FAIL: qty drift\n";
         return false;
     }
+    return true;
+}
+void OrderBook::restOrder(const Order& order) {
+    Order incoming = order;
+    if (incoming.side == Side::Buy) {
+        add_bid(incoming);
+    } else {
+        add_ask(incoming);
+    }
+}
+
+bool OrderBook::reduceQuantity(uint64_t order_id, int64_t qty) {
+    auto it = phonebook.find(order_id);
+    if (it == phonebook.end()) return false;
+
+    auto list_it = it->second;
+    Order& order = *list_it;
+
+    if (order.side == Side::Buy) {
+        auto map_it = bids.find(order.price);
+        if (map_it == bids.end()) return false;
+        map_it->second.total_quantity -= qty;
+        order.quantity -= qty;
+        if (order.quantity <= 0) {
+            map_it->second.orders.erase(list_it);
+            phonebook.erase(it);
+            if (map_it->second.orders.empty()) bids.erase(map_it);
+        }
+    } else {
+        auto map_it = asks.find(order.price);
+        if (map_it == asks.end()) return false;
+        map_it->second.total_quantity -= qty;
+        order.quantity -= qty;
+        if (order.quantity <= 0) {
+            map_it->second.orders.erase(list_it);
+            phonebook.erase(it);
+            if (map_it->second.orders.empty()) asks.erase(map_it);
+        }
+    }
+    return true;
+}
+
+bool OrderBook::replaceOrder(uint64_t old_id, uint64_t new_id, int64_t new_price, int64_t new_quantity) {
+    auto it = phonebook.find(old_id);
+    if (it == phonebook.end()) return false;
+
+    Order& old_order = *it->second;
+    Side side = old_order.side;
+    uint64_t user_id = old_order.user_id;
+
+    cancelOrder(old_id);
+
+    Order new_order{new_id, user_id, new_price, new_quantity, 0, side, Ordertype::Limit};
+    restOrder(new_order);
     return true;
 }
 
