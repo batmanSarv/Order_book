@@ -5,6 +5,9 @@
 #include <vector>
 #include <thread>
 #include "MatchingEngine.h"
+#include <x86intrin.h> // For __rdtsc and _mm_lfence
+#include <algorithm>
+#include <chrono>
 // ============================================================
 // BM_AddAndCancel — the mixed workload you already have
 // ============================================================
@@ -314,6 +317,66 @@ static void BM_LargeBookMatch(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations());
 }
 
+
+static void BM_LatencyPercentiles(benchmark::State& state) {
+    // 1. Calibrate TSC to Nanoseconds
+    auto wall_start = std::chrono::steady_clock::now();
+    uint64_t tsc_start = __rdtsc();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    uint64_t tsc_end = __rdtsc();
+    auto wall_end = std::chrono::steady_clock::now();
+    
+    double ns_per_cycle = std::chrono::duration<double, std::nano>(wall_end - wall_start).count() 
+                        / static_cast<double>(tsc_end - tsc_start);
+
+    OrderBook book;
+    std::mt19937_64 rng(42);
+    uint64_t id_counter = 1;
+    const int64_t mid = 100000;
+    
+    // 2. Pre-generate orders (100k is plenty for percentiles)
+    const int N = 100000; 
+    std::vector<Order> orders(N);
+    for (int i = 0; i < N; ++i) {
+        int64_t price = mid + (rng() % 2000) - 1000;
+        orders[i] = Order{id_counter++, 1, price, 1, 0, Side::Buy, Ordertype::Limit};
+    }
+
+    std::vector<uint64_t> latencies_cycles(N);
+
+    // 3. Run the loop
+    for (auto _ : state) {
+        book.clear(); // Clear the book so the pool doesn't overflow
+        
+        for (int i = 0; i < N; ++i) {
+            _mm_lfence(); 
+            uint64_t start = __rdtsc();
+            
+            book.addOrder(orders[i]);
+            
+            uint64_t end = __rdtsc();
+            _mm_lfence();
+            
+            latencies_cycles[i] = end - start;
+        }
+    }
+
+    // 4. Sort and calculate percentiles
+    std::sort(latencies_cycles.begin(), latencies_cycles.end());
+    
+    auto get_percentile = [&](double p) {
+        size_t idx = static_cast<size_t>(N * p);
+        return latencies_cycles[idx] * ns_per_cycle;
+    };
+
+    state.counters["p50_ns"]  = get_percentile(0.50);
+    state.counters["p90_ns"]  = get_percentile(0.90);
+    state.counters["p99_ns"]  = get_percentile(0.99);
+    state.counters["p999_ns"] = get_percentile(0.999);
+    state.counters["max_ns"]  = latencies_cycles.back() * ns_per_cycle;
+}
+
+BENCHMARK(BM_LatencyPercentiles);
 // ============================================================
 // ============================================================
 BENCHMARK(BM_AddAndCancel);
